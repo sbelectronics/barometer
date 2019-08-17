@@ -12,7 +12,7 @@
 #define RADIOEN_PIN PB4
 #define RADIOOUT_PIN PB3
 
-#define QUICK_MODE
+//#define QUICK_MODE
 
 #ifdef QUICK_MODE
 #define MAX_SAME 0
@@ -21,6 +21,8 @@
 #define MAX_SAME 10
 #define SLEEP_TIME SLEEP_8S
 #endif
+
+#define DELTA_CHECK(x,y,thresh) (abs((x)-(y))>=(thresh))
 
 #define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC (before power-off)
 
@@ -206,13 +208,13 @@ void loop()
     avgTemperature.add(temp);
     avgPressure.add(pres);
 
-    humid = avgHumidity.get() / 100; // percent humid
+    humid = avgHumidity.get() / 10; // tenth of a percent humid
     temp = avgTemperature.get() / 10; // tenth of a degree
     pres = avgPressure.get() / 10; // hpa
 
-     if ((lastHumidity != humid) ||
-        (lastTemperature != temp) ||
-        (lastPressure != pres)) {
+     if ((DELTA_CHECK(lastHumidity,humid,10)) ||
+         (DELTA_CHECK(lastTemperature,temp,5)) ||
+         (DELTA_CHECK(lastPressure,pres,2))) {
 
         lastHumidity = humid;
         lastTemperature = temp;
