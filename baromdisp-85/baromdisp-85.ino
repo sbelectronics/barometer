@@ -12,19 +12,29 @@
 #define RADIOEN_PIN PB4
 #define RADIOOUT_PIN PB3
 
+#define QUICK_MODE
+
+#ifdef QUICK_MODE
+#define MAX_SAME 0
+#define SLEEP_TIME SLEEP_1S
+#else
+#define MAX_SAME 10
+#define SLEEP_TIME SLEEP_8S
+#endif
+
 #define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC (before power-off)
 
 class Averager {
  public:
-  int values[10];
-  unsigned char count, index;
+  int16_t values[10];
+  uint8_t count, index;
   
   void init() {
       count = 0;
       index = 0;
   }
 
-  void add(int value) {
+  void add(int16_t value) {
       values[index % 10] = value;
       index ++;
       if (count < 10) {
@@ -32,8 +42,8 @@ class Averager {
       }
   }
 
-  int get() {
-    int accum;
+  int16_t get() {
+    int32_t accum;
     accum = 0;
     for (int i=0; i<count; i++) {
       accum += values[i];
@@ -43,7 +53,9 @@ class Averager {
 };
 
 int lastHumidity, lastTemperature, lastPressure;
-unsigned char id = 1;
+uint8_t sameCounter = 0;
+uint8_t seq = 0;
+uint32_t id = 0xFEEDFA1F;
 
 Averager avgHumidity, avgTemperature, avgPressure;
 
@@ -53,10 +65,12 @@ RCSwitch mySwitch = RCSwitch();
 void setup()
 {
     mySwitch.enableTransmit(RADIOOUT_PIN);
+    mySwitch.setRepeatTransmit(3); // needs to be at least two or the receiver won't detect
 
+    // Send a signal that we just booted
     digitalWrite(RADIOEN_PIN, HIGH);
     delay(1);
-    DWrite(0,0x8466);
+    DWrite3(0,0x66, 0x84, 0x66);
     digitalWrite(RADIOEN_PIN,LOW);
 
     Wire.begin();
@@ -71,18 +85,34 @@ void setup()
     lastPressure = 0;
 }
 
-unsigned char counter = 0;
-uint16_t crc;
+#define W_ID 5
+#define W_SEQ 4
+#define W_T 10
+#define W_H 10
+#define W_P 12
+#define W_CRC 8
 
-void DWrite(unsigned int var, unsigned int x)
+#define O_ID   0
+#define O_SEQ  O_ID + W_ID
+#define O_T    O_SEQ + W_SEQ
+#define O_H    O_T + W_T
+#define O_P    O_H + W_H
+#define O_CRC  O_P + W_P
+#define O_TERM O_CRC + W_CRC
+
+// Note: Requires modifications
+//          arduino tx library - modify to support arbitrary length strings
+//          pi rx library - change MAX_CHANGES from 67 to 129
+void DWrite3(uint8_t seq, unsigned int t, unsigned int h, unsigned int p)
 {
-  char s[33];
+  char s[O_TERM + 1];
   unsigned int v;
+  uint16_t crc;
 
- // id - 4 bits
-  v = id;
-  for (int i=0; i<4; i++) {
-    if (v&0x08) {
+ // id - 5 bits
+  v = id & 0x1F;
+  for (int i=0; i<W_ID; i++) {
+    if (v&0x10) {
       s[i]='1';
     } else {
       s[i]='0';
@@ -90,67 +120,95 @@ void DWrite(unsigned int var, unsigned int x)
     v=v<<1;
   }
 
-  // variable - 4 bits
-  v=var;
-  for (int i=0; i<4; i++) {
+  // seq - 4 bits
+  v=seq;
+  for (int i=0; i<W_SEQ; i++) {
     if (v&0x08) {
-      s[4+i]='1';
+      s[O_SEQ+i]='1';
     } else {
-      s[4+i]='0';
+      s[O_SEQ+i]='0';
     }
     v=v<<1;
   }
 
-  // value - 16 bits
-  v=x;
-  for (int i=0; i<16; i++) {
-    if (v&0x8000) {
-      s[8+i]='1';
+  // temp - 10 bits
+  v=t;
+  for (int i=0; i<W_T; i++) {
+    if (v&0x0200) {
+      s[O_T+i]='1';
     } else {
-      s[8+i]='0';
+      s[O_T+i]='0';
+    }
+    v=v<<1;
+  }
+
+  // humid - 10 bits
+  v=h;
+  for (int i=0; i<W_H; i++) {
+    if (v&0x0200) {
+      s[O_H+i]='1';
+    } else {
+      s[O_H+i]='0';
+    }
+    v=v<<1;
+  }
+
+  // barom - 12 bits
+  v=p;
+  for (int i=0; i<W_P; i++) {
+    if (v&0x0800) {
+      s[O_P+i]='1';
+    } else {
+      s[O_P+i]='0';
     }
     v=v<<1;
   }
 
   crc = 0;
-  crc = _crc16_update(crc, 0);
-  crc = _crc16_update(crc, var);
-  crc = _crc16_update(crc, x>>8);
-  crc = _crc16_update(crc, x&0xFF);
+  crc = _crc16_update(crc, id & 0x1F);
+  crc = _crc16_update(crc, seq & 0x0F);
+  crc = _crc16_update(crc, t>>8);
+  crc = _crc16_update(crc, t&0xFF);
+  crc = _crc16_update(crc, h>>8);
+  crc = _crc16_update(crc, h&0xFF);
+  crc = _crc16_update(crc, p>>8);
+  crc = _crc16_update(crc, p&0xFF);
 
   // crc - 8 bits
   v=crc;
-  for (int i=0; i<8; i++) {
+  for (int i=0; i<W_CRC; i++) {
     if (v&0x80) {
-      s[24+i]='1';
+      s[O_CRC+i]='1';
     } else {
-      s[24+i]='0';
+      s[O_CRC+i]='0';
     }
     v=v<<1;
   }
 
-  s[32] = 0;
+  s[O_TERM] = 0;
                  
-  mySwitch.send(s);
+  mySwitch.sendLong(s);
 }
 
 void loop()
 {
     char str[64];
     int temp, humid, pres;
+    uint8_t r;
+    uint8_t changed;
 
     BME280ForceMeasurement();
-    humid = BME280humidity()/100;
-    temp = BME280temperature()/10;
-    pres = BME280pressure()/100;
+    humid = BME280humidity();
+    temp = BME280temperature();
+    pres = BME280pressure()/10; // tenth of an hpa, otherwise we'll overflow
 
     avgHumidity.add(humid);
     avgTemperature.add(temp);
     avgPressure.add(pres);
 
-    humid = avgHumidity.get();
-    temp = avgTemperature.get();
-    pres = avgPressure.get();
+    humid = avgHumidity.get() / 100; // percent humid
+    temp = avgTemperature.get() / 10; // tenth of a degree
+    pres = avgPressure.get() / 10; // hpa
 
      if ((lastHumidity != humid) ||
         (lastTemperature != temp) ||
@@ -160,18 +218,35 @@ void loop()
         lastTemperature = temp;
         lastPressure = pres;
 
-        counter++;
+        changed = 1;
+    } else {
+        changed = 0;
+        sameCounter++;
     }
 
-    digitalWrite(RADIOEN_PIN, HIGH);
-    delay(1);
+    if (changed || (sameCounter>MAX_SAME)) {
+        sameCounter = 0;
+        seq++;
+      
+        digitalWrite(RADIOEN_PIN, HIGH);
+        delay(1);
 
-    DWrite(0, 6684);
-    DWrite(1, humid);
-    DWrite(2, temp);
-    DWrite(3, pres);
+        /*DWrite(0, 6684);
+        DWrite(1, humid);
+        DWrite(2, temp);
+        DWrite(3, pres);*/
+
+        DWrite3(seq, temp, humid, pres);
+
+        digitalWrite(RADIOEN_PIN,LOW);
+    }
     
-    digitalWrite(RADIOEN_PIN,LOW);
+    powerDown(SLEEP_TIME);
 
-    powerDown(SLEEP_4S);
+    // Add a random component to the sleep.
+    // this will pick between 16ms, 32ms, 64ms, 128ms, 250ms, and nothing.
+    r=random(6);
+    if (r<5) {
+      powerDown(r);
+    }
 }

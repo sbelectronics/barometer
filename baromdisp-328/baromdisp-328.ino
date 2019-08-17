@@ -69,7 +69,7 @@ class Averager {
 
 unsigned char image[WINDOW_W * WINDOW_H / 8];
 int lastHumidity, lastTemperature, lastPressure;
-unsigned char id = 1;
+unsigned char id = 2;
 
 Averager avgHumidity, avgTemperature, avgPressure;
 
@@ -79,6 +79,8 @@ RCSwitch mySwitch = RCSwitch();
 void setup()
 {
     mySwitch.enableTransmit(RADIOOUT_PIN);
+    mySwitch.setProtocol(1);
+    mySwitch.setRepeatTransmit(4); // needs to be at least two or the receiver won't detect
 
     digitalWrite(RADIOEN_PIN, HIGH);
     delay(1);
@@ -183,6 +185,96 @@ void DWrite(unsigned int var, unsigned int x)
   mySwitch.send(s);
 }
 
+#define W_ID 5
+#define W_T 12
+#define W_H 12
+#define W_P 12
+#define W_CRC 8
+
+#define O_ID   0
+#define O_T    O_ID + W_ID
+#define O_H    O_T + W_T
+#define O_P    O_H + W_H
+#define O_CRC  O_P + W_P
+#define O_TERM O_CRC + W_CRC
+
+// Note: Requires modifications
+//          arduino tx library - modify to support arbitrary length strings
+//          pi rx library - change MAX_CHANGES from 67 to 129
+void DWrite3(unsigned int t, unsigned int h, unsigned int p)
+{
+  char s[O_TERM + 1];
+  unsigned int v;
+
+ // id - 5 bits
+  v = id;
+  for (int i=0; i<W_ID; i++) {
+    if (v&0x10) {
+      s[i]='1';
+    } else {
+      s[i]='0';
+    }
+    v=v<<1;
+  }
+
+  // temp - 12 bits
+  v=t;
+  for (int i=0; i<W_T; i++) {
+    if (v&0x0800) {
+      s[O_T+i]='1';
+    } else {
+      s[O_T+i]='0';
+    }
+    v=v<<1;
+  }
+
+  // temp - 12 bits
+  v=h;
+  for (int i=0; i<W_H; i++) {
+    if (v&0x0800) {
+      s[O_H+i]='1';
+    } else {
+      s[O_H+i]='0';
+    }
+    v=v<<1;
+  }
+
+  // temp - 12 bits
+  v=p;
+  for (int i=0; i<W_P; i++) {
+    if (v&0x0800) {
+      s[O_P+i]='1';
+    } else {
+      s[O_P+i]='0';
+    }
+    v=v<<1;
+  }
+
+  crc = 0;
+  crc = _crc16_update(crc, 0);
+  crc = _crc16_update(crc, t>>8);
+  crc = _crc16_update(crc, t&0xFF);
+  crc = _crc16_update(crc, h>>8);
+  crc = _crc16_update(crc, h&0xFF);
+  crc = _crc16_update(crc, p>>8);
+  crc = _crc16_update(crc, p&0xFF);
+
+  // crc - 8 bits
+  v=crc;
+  for (int i=0; i<W_CRC; i++) {
+    if (v&0x80) {
+      s[O_CRC+i]='1';
+    } else {
+      s[O_CRC+i]='0';
+    }
+    v=v<<1;
+  }
+
+  s[O_TERM] = 0;
+                 
+  mySwitch.sendLong(s);
+}
+
 void loop()
 {
     Paint paint(image, WINDOW_W, WINDOW_H);
@@ -274,6 +366,7 @@ void loop()
     DWrite(1, humid);
     DWrite(2, temp);
     DWrite(3, pres);
+    DWrite3(temp, humid, pres);
     
     digitalWrite(RADIOEN_PIN,LOW);
 
