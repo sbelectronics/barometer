@@ -13,6 +13,7 @@ while True:
             humid = (rfdevice.rx_code >> 20) & 0x3FF
             pres = (rfdevice.rx_code >> 8) & 0xFFF
             crc = rfdevice.rx_code & 0xFF
+            print("%X" % rfdevice.rx_code)
             print("id: %d, seq %d, temp: %d, humid: %d, pres: %d, crc: %d, pulselength: %d, protocol: %d" % (id, seq, temp, humid, pres, crc, rfdevice.rx_pulselength, rfdevice.rx_proto))
         else:
             id = rfdevice.rx_code >> 28

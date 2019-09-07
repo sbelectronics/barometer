@@ -1,0 +1,1 @@
+@reboot bash /home/pi/start_receiver.sh &> /dev/null
