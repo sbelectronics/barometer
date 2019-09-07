@@ -16,8 +16,30 @@ ifndef ID
 $(error ID is not set. Please use ID=<number> on command line)
 endif
 
+ifdef QUICK
+SLEEP_TIME = 6
+SLEEP_REPEAT = 1
+MAX_SAME = 1
+else
+SLEEP_TIME = 9
+SLEEP_REPEAT = 4
+MAX_SAME = 20
+endif
+
+ifdef RADION
+ENABLE_RADIOEN = 1
+else
+ENABLE_RADIOEN = 0
+endif
+
+ifdef STEADY
+ENABLE_STEADY = 1
+else
+ENABLE_STEADY = 0
+endif
+
 flash:
-	python patchid.py $(ID)
+	python patchid.py $(ID) $(SLEEP_TIME) $(SLEEP_REPEAT) $(MAX_SAME) $(ENABLE_RADIOEN) $(ENABLE_STEADY)
 	$(AVRDUDE) -B 3 -c usbasp -U flash:w:baromdisp-85.ino.withid.hex:i
 
 fuse:

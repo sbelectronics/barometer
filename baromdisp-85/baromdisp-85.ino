@@ -12,19 +12,27 @@
 #define RADIOEN_PIN PB4
 #define RADIOOUT_PIN PB3
 
-//#define QUICK_MODE
-
-#ifdef QUICK_MODE
-#define MAX_SAME 0
-#define SLEEP_TIME SLEEP_1S
-#else
-#define MAX_SAME 10
+// DO NOT EDIT THESE -- they will be overridden by patchid.py
+#define MAX_SAME 20
 #define SLEEP_TIME SLEEP_8S
-#endif
+#define SLEEP_REPEAT 4
+#define ENABLE_RADIOEN 0
+#define STEADY 0
+// I HOPE YOU DIDN"T EDIT THOSE
 
 #define DELTA_CHECK(x,y,thresh) (abs((x)-(y))>=(thresh))
 
 #define adc_disable() (ADCSRA &= ~(1<<ADEN)) // disable ADC (before power-off)
+
+struct ConfigBlock {
+  uint32_t header;
+  uint8_t id;
+  uint8_t sleep_time;
+  uint8_t sleep_repeat;
+  uint8_t max_same;
+  uint8_t enable_radioen;
+  uint8_t steady;
+};
 
 class Averager {
  public:
@@ -57,7 +65,9 @@ class Averager {
 int lastHumidity, lastTemperature, lastPressure;
 uint8_t sameCounter = 0;
 uint8_t seq = 0;
-uint32_t id = 0xFEEDFA1F;
+uint32_t idq = 0xFEEDFA1F;
+
+ConfigBlock config = {0xFEEDFACE, 0x1F, SLEEP_TIME, SLEEP_REPEAT, MAX_SAME, ENABLE_RADIOEN};
 
 Averager avgHumidity, avgTemperature, avgPressure;
 
@@ -66,12 +76,20 @@ RCSwitch mySwitch = RCSwitch();
 
 void setup()
 {
+    if (config.steady) {
+      digitalWrite(RADIOEN_PIN, HIGH);
+      digitalWrite(RADIOOUT_PIN, HIGH);
+      while (1) ;
+    }
+  
     mySwitch.enableTransmit(RADIOOUT_PIN);
     mySwitch.setRepeatTransmit(3); // needs to be at least two or the receiver won't detect
 
     // Send a signal that we just booted
-    digitalWrite(RADIOEN_PIN, HIGH);
-    delay(1);
+    if (config.enable_radioen) {
+        digitalWrite(RADIOEN_PIN, HIGH);
+        delay(1);
+    }
     DWrite3(0,0x66, 0x84, 0x66);
     digitalWrite(RADIOEN_PIN,LOW);
 
@@ -112,7 +130,7 @@ void DWrite3(uint8_t seq, unsigned int t, unsigned int h, unsigned int p)
   uint16_t crc;
 
  // id - 5 bits
-  v = id & 0x1F;
+  v = config.id & 0x1F;
   for (int i=0; i<W_ID; i++) {
     if (v&0x10) {
       s[i]='1';
@@ -167,7 +185,7 @@ void DWrite3(uint8_t seq, unsigned int t, unsigned int h, unsigned int p)
   }
 
   crc = 0;
-  crc = _crc16_update(crc, id & 0x1F);
+  crc = _crc16_update(crc, config.id & 0x1F);
   crc = _crc16_update(crc, seq & 0x0F);
   crc = _crc16_update(crc, t>>8);
   crc = _crc16_update(crc, t&0xFF);
@@ -226,24 +244,23 @@ void loop()
         sameCounter++;
     }
 
-    if (changed || (sameCounter>MAX_SAME)) {
+    if (changed || (sameCounter>config.max_same)) {
         sameCounter = 0;
         seq++;
-      
-        digitalWrite(RADIOEN_PIN, HIGH);
-        delay(1);
 
-        /*DWrite(0, 6684);
-        DWrite(1, humid);
-        DWrite(2, temp);
-        DWrite(3, pres);*/
+        if (config.enable_radioen) {
+            digitalWrite(RADIOEN_PIN, HIGH);
+            delay(1);
+        }
 
         DWrite3(seq, temp, humid, pres);
 
         digitalWrite(RADIOEN_PIN,LOW);
     }
-    
-    powerDown(SLEEP_TIME);
+
+    for (int i=0; i<config.sleep_repeat; i++) {
+        powerDown(config.sleep_time);
+    }
 
     // Add a random component to the sleep.
     // this will pick between 16ms, 32ms, 64ms, 128ms, 250ms, and nothing.
