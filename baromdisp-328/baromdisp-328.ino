@@ -3,6 +3,9 @@
  * http://www.smbkaer.com/
  */
 
+//#define BME680
+#define EPAPER_DISPLAY
+
 #include <SPI.h>
 #include "fepd2in13.h"
 #include "epdpaint.h"
@@ -29,6 +32,8 @@
   * 1 byte = 8 pixels, therefore you have to set 8*N pixels at a time.
   */
 Epd epd;
+
+/* Note: BME680 isn't working. Seems to crash the arduino somewhere after beginReading() */
 
 #ifdef BME680
 Adafruit_BME680 bme; // I2C
@@ -87,14 +92,15 @@ void setup()
     DWrite(0,0x8466);
     digitalWrite(RADIOEN_PIN,LOW);
   
-    //Serial.begin(1200);
-  
-    // put your setup code here, to run once:
-    //Serial.begin(9600);
-/*    if (epd.Init() != 0) {
+#ifdef EPAPER_DISPLAY
+/*    Looks like I initialize this below...
+      
+   if (epd.Init() != 0) {
         //Serial.print("e-Paper init failed\n");
         return;
-    }*/
+    }
+*/
+#endif
 
     if (!bme.begin()) {
         //Serial.println(F("Could not find a valid BME680 sensor, check wiring!"));
@@ -113,6 +119,18 @@ void setup()
     lastHumidity = 0;
     lastTemperature = 0;
     lastPressure = 0;
+}
+
+void epdtest() {
+  Paint paint(image, WINDOW_W, WINDOW_H);
+        paint.Clear(1);
+        paint.SetRotate(ROTATE_90);
+        
+        paint.DrawStringAt(0, 0, "Scott", &Font16, 0);
+
+        epd.Init();
+        epd.SetFrameRAM(image, WINDOW_W/8, WINDOW_H);
+        epd.Sleep();
 }
 
 unsigned char counter = 0;
@@ -325,7 +343,6 @@ void loop()
         paint.Clear(1);
         paint.SetRotate(ROTATE_90);
 
-        //sprintf(str, "Humid: %d%%", int(humid));
         sprintf(str, "%d H: %d%%", counter, humid);
         paint.DrawStringAt(0, 0, str, &Font16, 0);
 
@@ -349,18 +366,6 @@ void loop()
 
     digitalWrite(RADIOEN_PIN, HIGH);
     delay(1);
-    /*crc = 0;
-    SWrite(0x66);
-    SWrite(0x84);
-    SWrite(humid >> 8);
-    SWrite(humid & 0xFF);
-    SWrite(temp >> 8);
-    SWrite(temp & 0xFF);
-    SWrite(pres >> 8);
-    SWrite(pres & 0xFF);
-    SWrite(crc >> 8);
-    SWrite(crc & 0xFF);  // wrong!
-    delay(1);*/
 
     DWrite(0, 6684);
     DWrite(1, humid);
